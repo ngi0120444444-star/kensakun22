@@ -1,0 +1,8 @@
+# HTML取得・パース（全サイト共通）
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# JavaScriptレンダリングが必要なサイト用（クラウドワークス等）
+# インストール後、以下も実行してください:
+#   playwright install chromium
+playwright>=1.44.0

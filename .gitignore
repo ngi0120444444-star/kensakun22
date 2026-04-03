@@ -1,0 +1,18 @@
+# APIキー・機密情報
+scraper/.env
+
+# 収集データ（案件は毎回変わるため除外）
+scraper/output/jobs.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# バッチファイルは除外（パスがPC固有のため）
+*.bat
