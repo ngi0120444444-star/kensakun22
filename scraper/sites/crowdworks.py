@@ -52,47 +52,20 @@ def _parse_jobs_from_html(html: str) -> list[dict]:
     jobs = []
 
     # 案件カード候補セレクタ
-    item_selectors = [
-        "li.job_offer__item",
-        "article.job_offer",
-        "li[class*='job_offer']",
-        "div[class*='job_offer_item']",
-        "div[class*='JobOfferCard']",
+    import re as _re
+
+    # CrowdWorks は li タグ（クラスなし）が1案件に対応
+    # クラス名にVueのハッシュが付くため class*= で部分一致
+    items = [
+        li for li in soup.find_all("li")
+        if li.find("a", href=_re.compile(r"/public/jobs/\d+"))
     ]
 
-    items = []
-    for sel in item_selectors:
-        items = soup.select(sel)
-        if items:
-            logger.debug(f"[crowdworks] セレクタ '{sel}' で {len(items)} 件発見")
-            break
-
     if not items:
-        # フォールバック: /public/jobs/配下へのリンクから収集
-        logger.warning("[crowdworks] カードセレクタ不一致。リンクベースにフォールバック")
-        links = soup.find_all("a", href=lambda h: h and "/public/jobs/" in h and h != "/public/jobs/search")
-        seen = set()
-        for a in links:
-            href = a.get("href", "")
-            # /public/jobs/数字 のパターンのみ
-            import re
-            if not re.search(r"/public/jobs/\d+", href):
-                continue
-            url = href if href.startswith("http") else BASE_URL + href
-            if url in seen:
-                continue
-            seen.add(url)
-            title = a.get_text(strip=True)
-            if title:
-                jobs.append({
-                    "title": title,
-                    "url": url,
-                    "price": "—",
-                    "posted_at": "—",
-                    "category": "—",
-                    "source": "crowdworks",
-                })
-        return jobs
+        logger.warning("[crowdworks] 案件カードが見つかりません（サイト構造変更の可能性）")
+        return []
+
+    logger.debug(f"[crowdworks] {len(items)} 件のカードを発見")
 
     for item in items:
         try:
@@ -106,62 +79,62 @@ def _parse_jobs_from_html(html: str) -> list[dict]:
 
 
 def _parse_item(item) -> Optional[dict]:
-    """1件の案件カード要素をパースする。"""
-    # タイトル & URL
+    """1件の案件カード（li）をパースする。
+    クラス名はVueハッシュ付きのため class*= で部分一致させる。
+    例: _titleLinkPc_1i9l4_26 → [class*='titleLink']
+    """
+    import re as _re
+
+    # ── タイトル & URL ──────────────────────────────────────────
     title_el = (
-        item.select_one("h3.job_offer__title a")
-        or item.select_one(".job_offer__title a")
-        or item.select_one("a.job_offer__title")
-        or item.select_one("h2 a")
-        or item.select_one("a[href*='/public/jobs/']")
+        item.select_one("[class*='titleLink']")
+        or item.find("a", href=_re.compile(r"/public/jobs/\d+"))
     )
     if not title_el:
         return None
 
     title = title_el.get_text(strip=True)
-    href = title_el.get("href", "")
+    href  = title_el.get("href", "")
+    # カテゴリリンク等を除外（/public/jobs/数字 のみ）
+    if not _re.search(r"/public/jobs/\d+", href):
+        return None
     url = href if href.startswith("http") else BASE_URL + href
-    if not title or not href:
+    if not title:
         return None
 
-    # 単価・報酬
-    price_el = (
-        item.select_one(".job_offer__reward")
-        or item.select_one(".reward_amount")
-        or item.select_one("[class*='reward']")
-        or item.select_one("[class*='price']")
-        or item.select_one("[class*='budget']")
-    )
-    price = price_el.get_text(strip=True) if price_el else "—"
+    # ── 単価・報酬 ───────────────────────────────────────────────
+    # 支払方式: span[class*='paymentLabel'] → "固定報酬制" / "時間単価制"
+    # 金額:     b[class*='amountPc']        → "〜5,000円" / "2,000円〜3,000円"
+    pay_type_el = item.select_one("[class*='paymentLabel']")
+    amount_el   = item.select_one("[class*='amountPc']")
+    pay_type = pay_type_el.get_text(strip=True) if pay_type_el else ""
+    amount   = amount_el.get_text(strip=True)   if amount_el   else ""
+    # 不要な空白・改行を正規化
+    amount = _re.sub(r"\s+", "", amount)
+    price = f"{pay_type}　{amount}".strip() if (pay_type or amount) else "—"
 
-    # 掲載日
-    date_el = (
-        item.select_one("time[datetime]")
-        or item.select_one(".job_offer__published_at")
-        or item.select_one("[class*='published']")
-        or item.select_one("[class*='date']")
-    )
+    # ── 掲載日 ──────────────────────────────────────────────────
+    # div[class*='postDatePc'] → "掲載日：2026年03月31日"
+    date_el = item.select_one("[class*='postDatePc']")
     if date_el:
-        posted_at = date_el.get("datetime") or date_el.get_text(strip=True)
+        raw = date_el.get_text(strip=True)
+        posted_at = raw.replace("掲載日：", "").strip()
     else:
-        posted_at = "—"
+        # フォールバック: 締切日
+        limit_el = item.select_one("[class*='absoluteDate']")
+        posted_at = limit_el.get_text(strip=True) if limit_el else "—"
 
-    # カテゴリ
-    cat_el = (
-        item.select_one(".job_offer__job_type")
-        or item.select_one(".job_type_label")
-        or item.select_one("[class*='job_type']")
-        or item.select_one("[class*='category']")
-    )
+    # ── カテゴリ ─────────────────────────────────────────────────
+    cat_el = item.find("a", href=_re.compile(r"/public/jobs/category/"))
     category = cat_el.get_text(strip=True) if cat_el else "—"
 
     return {
-        "title": title,
-        "url": url,
-        "price": price,
+        "title":     title,
+        "url":       url,
+        "price":     price,
         "posted_at": posted_at,
-        "category": category,
-        "source": "crowdworks",
+        "category":  category,
+        "source":    "crowdworks",
     }
 
 

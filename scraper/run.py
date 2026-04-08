@@ -18,8 +18,9 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from sites import get_scraper, REGISTRY
 from filters import filter_jobs
-from storage import save_jobs
+from storage import save_jobs, load_jobs
 from report import generate_report
+from notify import notify_new_jobs
 
 
 def setup_logging():
@@ -88,14 +89,23 @@ def run_site(site_name: str, pages: int, logger: logging.Logger) -> dict:
         for kw, count in sorted(kw_summary.items(), key=lambda x: -x[1]):
             logger.info(f"           「{kw}」: {count} 件")
 
-    # 保存
+    # 保存（新規追加分を特定するため保存前後でURLセットを比較）
+    before_urls = {j["url"] for j in load_jobs()}
     result = save_jobs(matched)
     logger.info(
         f"  [{site_name}] 新規追加: {result['added']} 件  "
         f"スキップ(重複): {result['skipped']} 件"
     )
 
-    return {"fetched": len(jobs), "matched": len(matched), "added": result["added"]}
+    # 新規追加された案件を取得（LINE通知用）
+    newly_added = [j for j in matched if j["url"] not in before_urls]
+
+    return {
+        "fetched": len(jobs),
+        "matched": len(matched),
+        "added": result["added"],
+        "new_jobs": newly_added,
+    }
 
 
 def main():
@@ -111,6 +121,8 @@ def main():
 
     total_fetched = total_matched = total_added = 0
 
+    all_new_jobs = []
+
     for i, site_name in enumerate(sites):
         if i > 0:
             logger.info("-" * 55)
@@ -118,6 +130,7 @@ def main():
         total_fetched += result["fetched"]
         total_matched += result["matched"]
         total_added += result["added"]
+        all_new_jobs.extend(result.get("new_jobs", []))
 
     # HTMLレポート生成（全サイト完了後に1回だけ）
     logger.info("=" * 55)
@@ -133,6 +146,11 @@ def main():
         f"新規保存 {total_added} 件（累計 {total_saved} 件）"
     )
     logger.info("=" * 55)
+
+    # LINE通知（新規案件がある場合のみ）
+    if all_new_jobs:
+        logger.info(f"【LINE通知】新着 {len(all_new_jobs)} 件を送信中...")
+        notify_new_jobs(all_new_jobs)
 
 
 if __name__ == "__main__":
