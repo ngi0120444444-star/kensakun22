@@ -42,10 +42,10 @@ def register_task(hour: int = 9, minute: int = 0):
     # バッチファイル経由で環境変数を設定してから実行
     bat_path = os.path.join(SCRIPT_DIR, "_scheduler_run.bat")
     bat_content = (
-        "@echo off\n"
-        f"set PLAYWRIGHT_BROWSERS_PATH={playwright_path}\n"
-        f"cd /d \"{SCRAPER_DIR}\"\n"
-        f"\"{python}\" \"{RUN_PY}\" --all --pages 2\n"
+        "@echo off\r\n"
+        f"set PLAYWRIGHT_BROWSERS_PATH={playwright_path}\r\n"
+        f"cd /d \"{SCRAPER_DIR}\"\r\n"
+        f"\"{python}\" \"{RUN_PY}\" --all --pages 2\r\n"
     )
     with open(bat_path, "w", encoding="cp932") as f:
         f.write(bat_content)
@@ -58,37 +58,40 @@ def register_task(hour: int = 9, minute: int = 0):
         "/SC", "DAILY",
         "/ST", time_str,
         "/F",           # 既存タスクを上書き
-        "/RL", "HIGHEST",  # 最高権限
     ]
 
     print(f"タスク登録中: {TASK_NAME}")
     print(f"  実行時刻: 毎日 {time_str}")
     print(f"  実行スクリプト: {bat_path}")
 
-    result = subprocess.run(cmd, capture_output=True, text=True, encoding="cp932")
+    result = subprocess.run(cmd, capture_output=True, encoding="cp932",
+                            errors="replace")
     if result.returncode == 0:
-        print("✓ タスクスケジューラへの登録が完了しました！")
-        print(f"  毎日 {time_str} に自動実行されます。")
-        print(f"  確認: タスクスケジューラ → タスクスケジューラライブラリ → {TASK_NAME}")
+        print("[OK] タスクスケジューラへの登録が完了しました！")
+        print(f"     毎日 {time_str} に自動実行されます。")
+        print(f"     確認: タスクスケジューラ -> タスクスケジューラライブラリ -> {TASK_NAME}")
     else:
-        print(f"✗ 登録失敗: {result.stderr or result.stdout}")
+        msg = (result.stderr or result.stdout or "").strip()
+        print(f"[NG] 登録失敗: {msg}")
         sys.exit(1)
 
 
 def delete_task():
     """登録済みタスクを削除する。"""
     cmd = ["schtasks", "/Delete", "/TN", TASK_NAME, "/F"]
-    result = subprocess.run(cmd, capture_output=True, text=True, encoding="cp932")
+    result = subprocess.run(cmd, capture_output=True, encoding="cp932",
+                            errors="replace")
     if result.returncode == 0:
-        print(f"✓ タスク「{TASK_NAME}」を削除しました。")
+        print(f"[OK] タスク「{TASK_NAME}」を削除しました。")
     else:
-        print(f"✗ 削除失敗（未登録の可能性あり）: {result.stderr or result.stdout}")
+        print(f"[NG] 削除失敗（未登録の可能性あり）: {result.stderr or result.stdout}")
 
 
 def show_task():
     """登録済みタスクの状態を表示する。"""
     cmd = ["schtasks", "/Query", "/TN", TASK_NAME, "/FO", "LIST"]
-    result = subprocess.run(cmd, capture_output=True, text=True, encoding="cp932")
+    result = subprocess.run(cmd, capture_output=True, encoding="cp932",
+                            errors="replace")
     if result.returncode == 0:
         print(result.stdout)
     else:
